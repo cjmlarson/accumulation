@@ -1,10 +1,9 @@
 """Plots for JRC flood-depth data."""
 
-import math
 from io import BytesIO
-from urllib.request import urlopen
 
 import matplotlib.pyplot as plt
+import mercantile
 import numpy as np
 import rasterio
 from matplotlib.colors import ListedColormap
@@ -22,32 +21,14 @@ from rasterio.windows import from_bounds
 import google as google_maps
 import jrc
 
-_WEB_MERCATOR_MAX_LATITUDE = math.degrees(math.atan(math.sinh(math.pi)))
-
 
 def zoom(lat: float, lon: float, level: int, size: int = 640) -> tuple[float, ...]:
-    r"""Return bounds for a centered Web Mercator map view.
-
-    .. math::
-
-        y = \frac{1}{2}\left(1 -
-            \frac{\operatorname{asinh}(\tan \varphi)}{\pi}\right)
-
-        \varphi(y) = \arctan\left(\sinh\left(\pi(1 - 2y)\right)\right)
-
-    Here :math:`\varphi` is latitude and :math:`y` is its normalized Web
-    Mercator coordinate.
-    """
-    latitude = max(-_WEB_MERCATOR_MAX_LATITUDE, min(_WEB_MERCATOR_MAX_LATITUDE, lat))
-    x = (lon + 180) / 360
-    y = (1 - math.asinh(math.tan(math.radians(latitude))) / math.pi) / 2
-    radius = size / (2 * 256 * 2**level)
-
-    left = (x - radius) * 360 - 180
-    right = (x + radius) * 360 - 180
-    top = math.degrees(math.atan(math.sinh(math.pi * (1 - 2 * (y - radius)))))
-    bottom = math.degrees(math.atan(math.sinh(math.pi * (1 - 2 * (y + radius)))))
-    return left, bottom, right, top
+    """Return bounds for a centered Web Mercator map view."""
+    x, y = mercantile.xy(lon, lat, truncate=True)
+    radius = size * mercantile.CE / (2 * 256 * 2**level)
+    lower_left = mercantile.lnglat(x - radius, y - radius)
+    upper_right = mercantile.lnglat(x + radius, y + radius)
+    return lower_left.lng, lower_left.lat, upper_right.lng, upper_right.lat
 
 
 _zoom_bounds = zoom
@@ -105,9 +86,9 @@ def flooded(lat: float, lon: float, rp: int, zoom: int = 12) -> plt.Axes:
     extent = (left, right, bottom, top)
     point_x, point_y = transform("EPSG:4326", "EPSG:3857", [lon], [lat])
 
-    terrain_url = google_maps.terrain(lat, lon, zoom, size)
-    with urlopen(terrain_url, timeout=30) as response:
-        terrain = plt.imread(BytesIO(response.read()), format="png")
+    terrain = plt.imread(
+        BytesIO(google_maps.terrain(lat, lon, zoom, size)), format="png"
+    )
     left, bottom, right, top = transform_bounds("EPSG:4326", "EPSG:3857", *view_bounds)
     terrain_extent = (left, right, bottom, top)
 
